@@ -1,0 +1,335 @@
+{
+	"AWSTemplateFormatVersion" : "2010-09-09",
+	"Description" : "System Operations for AWS v2.5: Lab 3 - Managing Storage on AWS (Linux)",
+	"Parameters" : {
+		"VPCCIDR" : {
+			"Description" : "CIDR Block for VPC",
+			"Type" : "String",
+			"Default" : "10.5.0.0/16",
+			"AllowedValues" : ["10.5.0.0/16"]
+		},
+		"PublicSubnet1Param" : {
+			"Description" : "Public Subnet 1",
+			"Type" : "String",
+			"Default" : "10.5.0.0/24",
+			"AllowedValues" : ["10.5.0.0/24"]
+		},
+		"KeyName" : {
+			"Type" : "String",
+			"Description" : "Keyname for the keypair that Qwiklab will use to launch EC2 instances",
+			"Default" : "default-lab-key"
+		},
+		"LabUrlPrefix" : {
+			"Type" : "String",
+			"Default" : "https://d2lrzjb0vjvpn5.cloudfront.net/sys-ops/v2.5"
+		}
+	},
+	"Mappings" : {
+	"AmazonLinuxAMI": {
+      "us-east-1": {
+        "AMI": "ami-1ecae776"
+      },
+      "us-west-1": {
+        "AMI": "ami-d114f295"
+      },
+      "us-west-2": {
+        "AMI": "ami-e7527ed7"
+      },
+      "eu-west-1": {
+        "AMI": "ami-a10897d6"
+      },
+      "eu-central-1": {
+        "AMI": "ami-a8221fb5"
+      },
+      "sa-east-1": {
+        "AMI": "ami-b52890a8"
+      },
+      "ap-southeast-1": {
+        "AMI": "ami-68d8e93a"
+      },
+      "ap-southeast-2": {
+        "AMI": "ami-fd9cecc7"
+      },
+      "ap-northeast-1": {
+        "AMI": "ami-cbf90ecb"
+      }
+	}
+  },	"Resources" : {
+		"VPC" : {
+			"Type" : "AWS::EC2::VPC",
+			"Properties" : {
+				"CidrBlock" : {
+					"Ref" : "VPCCIDR"
+				},
+				"EnableDnsSupport" : "true",
+				"EnableDnsHostnames" : "true",
+				"Tags" : [{
+						"Key" : "VPC",
+						"Value" : "NAT-and-CLI"
+					}, {
+						"Key" : "Name",
+						"Value" : "Lab VPC"
+					}
+				]
+			}
+		},
+		"InternetGateway" : {
+			"Type" : "AWS::EC2::InternetGateway",
+			"DependsOn" : "VPC"
+		},
+		"AttachGateway" : {
+			"Type" : "AWS::EC2::VPCGatewayAttachment",
+			"DependsOn" : ["VPC", "InternetGateway"],
+			"Properties" : {
+				"VpcId" : {
+					"Ref" : "VPC"
+				},
+				"InternetGatewayId" : {
+					"Ref" : "InternetGateway"
+				}
+			}
+		},
+		"PublicSubnet1" : {
+			"Type" : "AWS::EC2::Subnet",
+			"DependsOn" : "AttachGateway",
+			"Properties" : {
+				"VpcId" : {
+					"Ref" : "VPC"
+				},
+				"CidrBlock" : {
+					"Ref" : "PublicSubnet1Param"
+				},
+				"MapPublicIpOnLaunch" : "true",
+				"AvailabilityZone" : {
+					"Fn::Select" : [
+						"0", {
+							"Fn::GetAZs" : ""
+						}
+					]
+				},
+				"Tags" : [{
+						"Key" : "Name",
+						"Value" : "Public Subnet 1"
+					}
+				]
+			}
+		},
+		"PublicRouteTable" : {
+			"Type" : "AWS::EC2::RouteTable",
+			"DependsOn" : ["VPC", "AttachGateway"],
+			"Properties" : {
+				"VpcId" : {
+					"Ref" : "VPC"
+				},
+				"Tags" : [{
+						"Key" : "Name",
+						"Value" : "Public"
+					}
+				]
+			}
+		},
+		"PublicRoute" : {
+			"Type" : "AWS::EC2::Route",
+			"DependsOn" : ["PublicRouteTable", "AttachGateway"],
+			"Properties" : {
+				"RouteTableId" : {
+					"Ref" : "PublicRouteTable"
+				},
+				"DestinationCidrBlock" : "0.0.0.0/0",
+				"GatewayId" : {
+					"Ref" : "InternetGateway"
+				}
+			}
+		},
+		"PublicSubnet1RouteTableAssociation" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"DependsOn" : ["PublicRouteTable", "PublicSubnet1", "AttachGateway"],
+			"Properties" : {
+				"SubnetId" : {
+					"Ref" : "PublicSubnet1"
+				},
+				"RouteTableId" : {
+					"Ref" : "PublicRouteTable"
+				}
+			}
+		},
+		"CLISecurityGroup" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"DependsOn" : "AttachGateway",
+			"Properties" : {
+				"GroupDescription" : "Security Group for CommandHostInstance",
+				"VpcId" : {
+					"Ref" : "VPC"
+				},
+				"Tags" : [{
+						"Key" : "Name",
+						"Value" : "CLISecurityGroup"
+					}
+				],
+				"SecurityGroupEgress" : [{
+						"IpProtocol" : "tcp",
+						"FromPort" : "0",
+						"ToPort" : "65535",
+						"CidrIp" : "0.0.0.0/0"
+					}, {
+						"IpProtocol" : "udp",
+						"FromPort" : "0",
+						"ToPort" : "65535",
+						"CidrIp" : "0.0.0.0/0"
+					}
+				],
+				"SecurityGroupIngress" : [{
+						"IpProtocol" : "tcp",
+						"FromPort" : "22",
+						"ToPort" : "22",
+						"CidrIp" : "0.0.0.0/0"
+					}
+				]
+			}
+		},
+		"RootRole" : {
+			"Type" : "AWS::IAM::Role",
+			"Properties" : {
+				"AssumeRolePolicyDocument" : {
+					"Version" : "2012-10-17",
+					"Statement" : [{
+							"Effect" : "Allow",
+							"Principal" : {
+								"Service" : ["ec2.amazonaws.com"]
+							},
+							"Action" : ["sts:AssumeRole"]
+						}
+					]
+				},
+				"Path" : "/",
+				"Policies" : [{
+						"PolicyName" : "root",
+						"PolicyDocument" : {
+							"Version" : "2012-10-17",
+							"Statement" : [{
+									"Effect" : "Allow",
+									"Action" : "*",
+									"Resource" : "*"
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+		"RootInstanceProfile" : {
+			"Type" : "AWS::IAM::InstanceProfile",
+			"DependsOn" : "RootRole",
+			"Properties" : {
+				"Path" : "/",
+				"Roles" : [{
+						"Ref" : "RootRole"
+					}
+				]
+			}
+		},
+		"WaitHandle01" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle",
+			"Properties" : {}
+		},
+		"WaitCondition01" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "CommandHostInstance",
+			"Properties" : {
+				"Handle" : {
+					"Ref" : "WaitHandle01"
+				},
+				"Timeout" : "1800"
+			}
+		},
+		"CommandHostInstance" : {
+			"Type" : "AWS::EC2::Instance",
+			"DependsOn" : ["RootInstanceProfile", "PublicSubnet1", "CLISecurityGroup", "AttachGateway"],
+			"Properties" : {
+				"KeyName" : {
+					"Ref" : "KeyName"
+				},
+				"IamInstanceProfile" : {
+					"Ref" : "RootInstanceProfile"
+				},
+				"ImageId" : {
+					"Fn::FindInMap" : [
+						"AmazonLinuxAMI", {
+							"Ref" : "AWS::Region"
+						},
+						"AMI"
+					]
+				},
+				"InstanceType" : "t2.medium",
+				"NetworkInterfaces" : [{
+						"DeviceIndex" : "0",
+						"AssociatePublicIpAddress" : "true",
+						"SubnetId" : {
+							"Ref" : "PublicSubnet1"
+						},
+						"GroupSet" : [{
+								"Ref" : "CLISecurityGroup"
+							}
+						]
+					}
+				],
+				"Tags" : [{
+						"Key" : "Name",
+						"Value" : "Command Host"
+					}
+				],
+				"UserData" : {
+					"Fn::Base64" : {
+						"Fn::Join" : [
+							"",
+							[
+								"#!/bin/bash -ex \n",
+								"yum -y update \n",
+								"mkdir /home/ec2-user/.aws \n",
+								"cat > /home/ec2-user/.aws/config <<EOF\n",
+								"[default]\n",
+								"region = ", { "Ref" : "AWS::Region" }, "\n",
+								"EOF\n",
+								"chown -R ec2-user:ec2-user /home/ec2-user/.aws\n",
+								"cd /home/ec2-user\n",
+								"yum -y install php\n",
+								"cd /home/ec2-user\n",
+								"wget ", {
+									"Ref" : "LabUrlPrefix"
+								}, "/lab-3-storage-linux/static/snapshotter.py\n",
+								"chmod 740 ./snapshotter.py\n",
+								"chown ec2-user snapshotter.py\n",
+								"pip install boto3\n",
+								"/opt/aws/bin/cfn-signal -s true '", {
+									"Ref" : "WaitHandle01"
+								}, "'\n"
+
+							]
+						]
+					}
+				}
+			}
+		}
+	},
+	"Outputs" : {
+		"qwikLAB" : {
+			"Description" : "Outputs to be used by qwikLAB",
+			"Value" : {
+				"Fn::Join" : [
+					"",
+					[
+						"{",
+						"\"Connection\": \"ssh ec2-user@", {
+							"Fn::GetAtt" : [
+								"CommandHostInstance",
+								"PublicIp"
+							]
+						},
+						"\"}"
+					]
+				]
+			}
+		}
+	}
+}
+
